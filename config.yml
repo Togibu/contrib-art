@@ -1,0 +1,5 @@
+repository:
+  path: ./repo
+  branch: main
+execution:
+  max_commits_per_day: 8
