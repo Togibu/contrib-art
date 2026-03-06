@@ -4,11 +4,15 @@ import argparse
 import cmd
 import getpass
 import importlib.util
+import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import date
+import urllib.error
+import urllib.request
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +50,31 @@ def _write_credentials(data: dict[str, str]) -> None:
     CREDENTIALS_FILE.chmod(0o600)
 
 
+def _create_github_repo(username: str, token: str, repo_name: str, private: bool) -> str | None:
+    payload = json.dumps({"name": repo_name, "private": private, "auto_init": True}).encode()
+    req = urllib.request.Request(
+        "https://api.github.com/user/repos",
+        data=payload,
+        headers={
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read())
+            return data["clone_url"]
+    except urllib.error.HTTPError as e:
+        body = json.loads(e.read())
+        print(f"Failed to create repo: {body.get('message', str(e))}")
+        return None
+    except Exception as e:
+        print(f"Failed to create repo: {e}")
+        return None
+
+
 def login() -> None:
     creds = _read_credentials()
     if creds.get("username"):
@@ -59,13 +88,55 @@ def login() -> None:
         print("Aborted.")
         return
 
+    print(
+        "\nTo get a Personal Access Token:\n"
+        "  1. Go to github.com → your profile icon → Settings\n"
+        "  2. Scroll down → Developer settings → Personal access tokens → Tokens (classic)\n"
+        "  3. Click 'Generate new token (classic)'\n"
+        "  4. Enable the 'repo' scope\n"
+        "  5. Copy the token — it is only shown once\n"
+    )
     token = getpass.getpass("Personal Access Token (hidden): ").strip()
     if not token:
         print("Aborted.")
         return
 
-    _write_credentials({"username": username, "token": token})
-    print(f"Logged in as: {username}")
+    print(
+        "\nWhich repo should cart push commits to?\n"
+        "  [1] Use an existing repo\n"
+        "  [2] Create a new repo\n"
+    )
+    choice = input("Choice [1/2]: ").strip()
+
+    repo_url: str = ""
+
+    if choice == "1":
+        repo_name = input("Repo name (just the name, not the full URL): ").strip()
+        if not repo_name:
+            print("Aborted.")
+            return
+        repo_url = f"https://github.com/{username}/{repo_name}.git"
+
+    elif choice == "2":
+        repo_name = input("New repo name: ").strip()
+        if not repo_name:
+            print("Aborted.")
+            return
+        visibility = input("Private repo? [y/N]: ").strip().lower()
+        private = visibility in ("y", "yes")
+        print(f"Creating repo '{repo_name}'...")
+        repo_url = _create_github_repo(username, token, repo_name, private) or ""
+        if not repo_url:
+            return
+        print(f"Repo created: {repo_url}")
+
+    else:
+        print("Aborted.")
+        return
+
+    _write_credentials({"username": username, "token": token, "repo_url": repo_url})
+    print(f"\nLogged in as: {username}")
+    print(f"Target repo:  {repo_url}")
 
 
 def logout() -> None:
@@ -342,9 +413,118 @@ def _write_schedule(path: Path, data: dict[str, Any]) -> None:
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
+def _auth_url(repo_url: str, username: str, token: str) -> str:
+    return repo_url.replace("https://", f"https://{username}:{token}@")
+
+
+def _setup_repo(repo_dir: Path, auth_url: str, username: str) -> bool:
+    if not (repo_dir / ".git").exists():
+        print("Cloning target repo...")
+        result = subprocess.run(
+            ["git", "clone", auth_url, str(repo_dir)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print("Failed to clone target repo. Are you connected to the internet?")
+            return False
+    else:
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "pull"],
+            capture_output=True,
+            text=True,
+        )
+
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "config", "user.name", username],
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "config", "user.email",
+         f"{username}@users.noreply.github.com"],
+        capture_output=True,
+    )
+    return True
+
+
 def perform_commits(root: Path, count: int) -> None:
-    # Placeholder: integrate real Git operations here.
-    print(f"[stub] Would perform {count} commits in repository at {root}")
+    creds = _read_credentials()
+    if not creds.get("token") or not creds.get("repo_url"):
+        print("Not logged in. Run 'cart login' first.")
+        return
+
+    username = creds["username"]
+    token = creds["token"]
+    repo_url = creds["repo_url"]
+    auth_url = _auth_url(repo_url, username, token)
+
+    repo_dir = Path.home() / ".config" / "cart" / "repo"
+    repo_dir.mkdir(parents=True, exist_ok=True)
+
+    if not _setup_repo(repo_dir, auth_url, username):
+        return
+
+    today = date.today().isoformat()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    commit_date = f"{today}T12:00:00"
+    commit_env = {**os.environ, "GIT_AUTHOR_DATE": commit_date, "GIT_COMMITTER_DATE": commit_date}
+
+    # Make N backdated commits to data.txt
+    data_file = repo_dir / "data.txt"
+    for i in range(count):
+        with open(data_file, "a", encoding="utf-8") as f:
+            f.write(f"{today} {i + 1}/{count}\n")
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "add", "data.txt"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "commit", "-m", f"cart: {today} ({i + 1}/{count})"],
+            capture_output=True,
+            text=True,
+            env=commit_env,
+        )
+
+    # Update progress.yml with real upload timestamp
+    progress_path = repo_dir / "progress.yml"
+    schedule_data = _read_schedule(root / "schedule.yml")
+
+    if not progress_path.exists():
+        meta = schedule_data.get("meta", {})
+        progress_data: dict[str, Any] = {
+            "pattern": schedule_data.get("pattern"),
+            "meta": meta,
+            "entries": [{"date": today, "uploaded_at": now, "commits": count}],
+        }
+    else:
+        progress_data = yaml.safe_load(progress_path.read_text(encoding="utf-8")) or {}
+        entries = progress_data.get("entries", [])
+        entries.append({"date": today, "uploaded_at": now, "commits": count})
+        progress_data["entries"] = entries
+
+    progress_path.write_text(yaml.safe_dump(progress_data, sort_keys=False), encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "add", "progress.yml"],
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "commit", "-m", f"cart: progress {today} {now}"],
+        capture_output=True,
+        text=True,
+        env=commit_env,
+    )
+
+    # Push
+    result = subprocess.run(
+        ["git", "-C", str(repo_dir), "push", auth_url],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print("Push failed. Are you connected to the internet?")
+        return
+
+    print(f"Pushed {count} commits for {today}.")
 
 
 def run_schedule(root: Path) -> None:
