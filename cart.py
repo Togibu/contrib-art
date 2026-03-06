@@ -32,19 +32,19 @@ DEFAULT_SCHEDULE: dict[str, Any] = {"pattern": None, "schedule": {}}
 
 
 def update_tool() -> None:
-    print("Prüfe auf Tool-Updates ...")
+    print("Checking for tool updates...")
     result = subprocess.run(
         ["git", "ls-remote", TOOL_REPO_URL, "HEAD"],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        print(f"Fehler beim Abrufen des Remote-Status:\n{result.stderr.strip()}")
+        print(f"Failed to fetch remote status:\n{result.stderr.strip()}")
         return
 
     remote_sha = result.stdout.split()[0] if result.stdout.strip() else ""
     if not remote_sha:
-        print("Remote-Hash konnte nicht ermittelt werden.")
+        print("Could not determine remote hash.")
         return
 
     local_result = subprocess.run(
@@ -56,34 +56,34 @@ def update_tool() -> None:
     local_sha = local_result.stdout.strip() if local_result.returncode == 0 else ""
 
     if local_sha and remote_sha == local_sha:
-        print("Tool ist aktuell.")
+        print("Tool is up to date.")
         return
 
     if local_sha:
-        print(f"Update verfügbar!\n  Lokal:  {local_sha[:12]}\n  Remote: {remote_sha[:12]}")
+        print(f"Update available!\n  Local:  {local_sha[:12]}\n  Remote: {remote_sha[:12]}")
     else:
-        print(f"Update verfügbar! Remote: {remote_sha[:12]}")
+        print(f"Update available! Remote: {remote_sha[:12]}")
 
-    answer = input("Jetzt updaten? [Y/n]: ").strip().lower()
+    answer = input("Update now? [Y/n]: ").strip().lower()
     if answer not in ("", "y", "yes"):
-        print("Abgebrochen.")
+        print("Aborted.")
         return
 
-    print("Lade tool.py herunter ...")
+    print("Downloading cart.py...")
     dl = subprocess.run(
         [
             "curl", "-fsSL",
-            f"https://raw.githubusercontent.com/Togibu/contrib-art/{remote_sha}/tool.py",
-            "-o", str(ROOT / "tool.py"),
+            f"https://raw.githubusercontent.com/Togibu/contrib-art/{remote_sha}/cart.py",
+            "-o", str(ROOT / "cart.py"),
         ],
         capture_output=True,
         text=True,
     )
     if dl.returncode != 0:
-        print(f"Fehler beim Download:\n{dl.stderr.strip()}")
+        print(f"Download failed:\n{dl.stderr.strip()}")
         return
 
-    print("tool.py wurde aktualisiert. Bitte das Tool neu starten.")
+    print("cart.py updated. Please restart the tool.")
 
 
 def _write_yaml(path: Path, data: dict[str, Any]) -> None:
@@ -107,7 +107,7 @@ def ensure_scaffold(root: Path, pull: bool | None = None) -> None:
         _write_yaml(schedule_path, DEFAULT_SCHEDULE)
 
     if pull is None:
-        answer = input("Patterns aus contrib-art-patterns pullen? [Y/n]: ").strip().lower()
+        answer = input("Pull patterns from contrib-art-patterns? [Y/n]: ").strip().lower()
         pull = answer in ("", "y", "yes")
 
     if pull:
@@ -115,7 +115,7 @@ def ensure_scaffold(root: Path, pull: bool | None = None) -> None:
 
 
 def pull_patterns(root: Path) -> None:
-    print(f"Klone {PATTERNS_REPO_URL} ...")
+    print(f"Cloning {PATTERNS_REPO_URL}...")
     with tempfile.TemporaryDirectory() as tmp:
         result = subprocess.run(
             ["git", "clone", "--depth", "1", PATTERNS_REPO_URL, tmp],
@@ -123,7 +123,7 @@ def pull_patterns(root: Path) -> None:
             text=True,
         )
         if result.returncode != 0:
-            print(f"Fehler beim Klonen:\n{result.stderr.strip()}")
+            print(f"Clone failed:\n{result.stderr.strip()}")
             return
 
         patterns_dir = root / "patterns"
@@ -147,7 +147,7 @@ def pull_patterns(root: Path) -> None:
             pulled.append(src.name)
 
     if not pulled:
-        print("Keine Patterns im Repo gefunden.")
+        print("No patterns found in repo.")
         return
 
     data = _read_patterns_cfg(root)
@@ -157,7 +157,7 @@ def pull_patterns(root: Path) -> None:
     if current_sha:
         data["last_pull_sha"] = current_sha
     _write_patterns_cfg(root, data)
-    print(f"Patterns gepullt: {', '.join(pulled)}")
+    print(f"Patterns pulled: {', '.join(pulled)}")
 
 
 def _read_patterns_cfg(root: Path) -> dict[str, Any]:
@@ -259,32 +259,32 @@ def update_patterns(root: Path) -> None:
     data = _read_patterns_cfg(root)
     local_sha = data.get("last_pull_sha", "")
 
-    print("Prüfe auf Updates ...")
+    print("Checking for pattern updates...")
     result = subprocess.run(
         ["git", "ls-remote", PATTERNS_REPO_URL, "HEAD"],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        print(f"Fehler beim Abrufen des Remote-Status:\n{result.stderr.strip()}")
+        print(f"Failed to fetch remote status:\n{result.stderr.strip()}")
         return
 
     remote_sha = result.stdout.split()[0] if result.stdout.strip() else ""
 
     if not remote_sha:
-        print("Remote-Hash konnte nicht ermittelt werden.")
+        print("Could not determine remote hash.")
         return
 
     if not local_sha:
-        print("Kein lokaler Stand gespeichert. Führe 'pattern pull' aus.")
+        print("No local state saved. Run 'pattern pull' first.")
         return
 
     if remote_sha == local_sha:
-        print("Patterns sind aktuell.")
+        print("Patterns are up to date.")
         return
 
-    print(f"Update verfügbar!\n  Lokal:  {local_sha[:12]}\n  Remote: {remote_sha[:12]}")
-    answer = input("Jetzt pullen? [Y/n]: ").strip().lower()
+    print(f"Update available!\n  Local:  {local_sha[:12]}\n  Remote: {remote_sha[:12]}")
+    answer = input("Pull now? [Y/n]: ").strip().lower()
     if answer in ("", "y", "yes"):
         pull_patterns(root)
 
@@ -331,7 +331,7 @@ def run_schedule(root: Path) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="tool", description="Contribution graph scheduler")
+    parser = argparse.ArgumentParser(prog="cart", description="Contribution graph art scheduler")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init", help="Create required folders/files if missing")
@@ -407,9 +407,9 @@ def _execute_command(argv: list[str]) -> None:
             return
 
 
-class ToolShell(cmd.Cmd):
-    intro = "tool interactive shell. Type 'help' or '?' for commands."
-    prompt = "tool> "
+class CartShell(cmd.Cmd):
+    intro = "cart interactive shell. Type 'help' or '?' for commands."
+    prompt = "cart> "
 
     def do_init(self, arg: str) -> None:
         """Initialize required folders/files."""
@@ -424,10 +424,10 @@ class ToolShell(cmd.Cmd):
         _execute_command(["run"])
 
     def do_pattern(self, arg: str) -> None:
-        """Pattern management. Usage: pattern list|choose <name>|install <name>|remove <name>|update"""
+        """Pattern management. Usage: pattern list|pull|choose <name>|install <name>|remove <name>|update"""
         argv = ["pattern"] + [a for a in arg.split() if a]
         if len(argv) == 1:
-            print("Usage: pattern list|choose <name>|install <name>|remove <name>|update")
+            print("Usage: pattern list|pull|choose <name>|install <name>|remove <name>|update")
             return
         _execute_command(argv)
 
@@ -457,7 +457,7 @@ class ToolShell(cmd.Cmd):
 def main(argv: list[str] | None = None) -> None:
     try:
         if argv is None and len(sys.argv) == 1:
-            ToolShell().cmdloop()
+            CartShell().cmdloop()
             return
         _execute_command(sys.argv[1:] if argv is None else argv)
     except Exception as exc:
