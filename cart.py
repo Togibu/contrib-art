@@ -39,7 +39,7 @@ def update_tool() -> None:
         text=True,
     )
     if result.returncode != 0:
-        print(f"Failed to fetch remote status:\n{result.stderr.strip()}")
+        print("Could not reach GitHub. Are you connected to the internet?")
         return
 
     remote_sha = result.stdout.split()[0] if result.stdout.strip() else ""
@@ -80,7 +80,7 @@ def update_tool() -> None:
         text=True,
     )
     if dl.returncode != 0:
-        print(f"Download failed:\n{dl.stderr.strip()}")
+        print("Download failed. Are you connected to the internet?")
         return
 
     print("cart.py updated. Please restart the tool.")
@@ -123,7 +123,7 @@ def pull_patterns(root: Path) -> None:
             text=True,
         )
         if result.returncode != 0:
-            print(f"Clone failed:\n{result.stderr.strip()}")
+            print("Clone failed. Are you connected to the internet?")
             return
 
         patterns_dir = root / "patterns"
@@ -266,7 +266,7 @@ def update_patterns(root: Path) -> None:
         text=True,
     )
     if result.returncode != 0:
-        print(f"Failed to fetch remote status:\n{result.stderr.strip()}")
+        print("Could not reach GitHub. Are you connected to the internet?")
         return
 
     remote_sha = result.stdout.split()[0] if result.stdout.strip() else ""
