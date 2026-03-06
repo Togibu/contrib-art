@@ -47,13 +47,8 @@ def update_tool() -> None:
         print("Could not determine remote hash.")
         return
 
-    local_result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        cwd=ROOT,
-    )
-    local_sha = local_result.stdout.strip() if local_result.returncode == 0 else ""
+    version_file = Path(__file__).parent / ".cart_version"
+    local_sha = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else ""
 
     if local_sha and remote_sha == local_sha:
         print("Tool is up to date.")
@@ -74,7 +69,7 @@ def update_tool() -> None:
         [
             "curl", "-fsSL",
             f"https://raw.githubusercontent.com/Togibu/contrib-art/{remote_sha}/cart.py",
-            "-o", str(ROOT / "cart.py"),
+            "-o", str(Path(__file__)),
         ],
         capture_output=True,
         text=True,
@@ -83,6 +78,7 @@ def update_tool() -> None:
         print("Download failed. Are you connected to the internet?")
         return
 
+    version_file.write_text(remote_sha, encoding="utf-8")
     print("cart.py updated. Please restart the tool.")
 
 
