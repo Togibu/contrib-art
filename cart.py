@@ -10,8 +10,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import urllib.error
-import urllib.request
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -51,25 +49,29 @@ def _write_credentials(data: dict[str, str]) -> None:
 
 
 def _create_github_repo(username: str, token: str, repo_name: str, private: bool) -> str | None:
-    payload = json.dumps({"name": repo_name, "private": private, "auto_init": True}).encode()
-    req = urllib.request.Request(
-        "https://api.github.com/user/repos",
-        data=payload,
-        headers={
-            "Authorization": f"token {token}",
-            "Accept": "application/vnd.github+json",
-            "Content-Type": "application/json",
-        },
-        method="POST",
+    payload = json.dumps({"name": repo_name, "private": private, "auto_init": True})
+    result = subprocess.run(
+        [
+            "curl", "-fsSL",
+            "-X", "POST",
+            "-H", f"Authorization: token {token}",
+            "-H", "Accept: application/vnd.github+json",
+            "-H", "Content-Type: application/json",
+            "-d", payload,
+            "https://api.github.com/user/repos",
+        ],
+        capture_output=True,
+        text=True,
     )
-    try:
-        with urllib.request.urlopen(req) as resp:
-            data = json.loads(resp.read())
-            return data["clone_url"]
-    except urllib.error.HTTPError as e:
-        body = json.loads(e.read())
-        print(f"Failed to create repo: {body.get('message', str(e))}")
+    if result.returncode != 0:
+        print("Failed to create repo. Are you connected to the internet?")
         return None
+    try:
+        data = json.loads(result.stdout)
+        if "clone_url" not in data:
+            print(f"Failed to create repo: {data.get('message', 'unknown error')}")
+            return None
+        return data["clone_url"]
     except Exception as e:
         print(f"Failed to create repo: {e}")
         return None
