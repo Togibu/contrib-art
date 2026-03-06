@@ -103,6 +103,36 @@ def login() -> None:
         print("Aborted.")
         return
 
+    print("Verifying token...")
+    verify = subprocess.run(
+        [
+            "curl", "-fsSL",
+            "-H", f"Authorization: token {token}",
+            "-H", "Accept: application/vnd.github+json",
+            "https://api.github.com/user",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if verify.returncode != 0:
+        print("Could not reach GitHub. Are you connected to the internet?")
+        return
+    try:
+        user_data = json.loads(verify.stdout)
+        actual_username = user_data.get("login", "")
+        if not actual_username:
+            print("Invalid token. Please check your Personal Access Token.")
+            return
+        if actual_username.lower() != username.lower():
+            print(f"Token is valid but belongs to '{actual_username}', not '{username}'.")
+            print(f"Continuing as '{actual_username}'.")
+            username = actual_username
+        else:
+            print(f"Token verified. Hello, {username}!")
+    except Exception:
+        print("Invalid token. Please check your Personal Access Token.")
+        return
+
     print(
         "\nWhich repo should cart push commits to?\n"
         "  [1] Use an existing repo\n"
