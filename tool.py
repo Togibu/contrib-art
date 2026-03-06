@@ -16,6 +16,7 @@ import yaml
 
 ROOT = Path.cwd()
 PATTERNS_REPO_URL = "https://github.com/Togibu/contrib-art-patterns.git"
+TOOL_REPO_URL = "https://github.com/Togibu/contrib-art.git"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "repository": {"path": "./repo", "branch": "main"},
@@ -28,6 +29,61 @@ DEFAULT_PATTERNS: dict[str, Any] = {
 }
 
 DEFAULT_SCHEDULE: dict[str, Any] = {"pattern": None, "schedule": {}}
+
+
+def update_tool() -> None:
+    print("Prüfe auf Tool-Updates ...")
+    result = subprocess.run(
+        ["git", "ls-remote", TOOL_REPO_URL, "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Fehler beim Abrufen des Remote-Status:\n{result.stderr.strip()}")
+        return
+
+    remote_sha = result.stdout.split()[0] if result.stdout.strip() else ""
+    if not remote_sha:
+        print("Remote-Hash konnte nicht ermittelt werden.")
+        return
+
+    local_result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    local_sha = local_result.stdout.strip() if local_result.returncode == 0 else ""
+
+    if local_sha and remote_sha == local_sha:
+        print("Tool ist aktuell.")
+        return
+
+    if local_sha:
+        print(f"Update verfügbar!\n  Lokal:  {local_sha[:12]}\n  Remote: {remote_sha[:12]}")
+    else:
+        print(f"Update verfügbar! Remote: {remote_sha[:12]}")
+
+    answer = input("Jetzt updaten? [Y/n]: ").strip().lower()
+    if answer not in ("", "y", "yes"):
+        print("Abgebrochen.")
+        return
+
+    print("Lade tool.py herunter ...")
+    dl = subprocess.run(
+        [
+            "curl", "-fsSL",
+            f"https://raw.githubusercontent.com/Togibu/contrib-art/{remote_sha}/tool.py",
+            "-o", str(ROOT / "tool.py"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if dl.returncode != 0:
+        print(f"Fehler beim Download:\n{dl.stderr.strip()}")
+        return
+
+    print("tool.py wurde aktualisiert. Bitte das Tool neu starten.")
 
 
 def _write_yaml(path: Path, data: dict[str, Any]) -> None:
@@ -73,6 +129,13 @@ def pull_patterns(root: Path) -> None:
         patterns_dir = root / "patterns"
         patterns_dir.mkdir(exist_ok=True)
 
+        sha_result = subprocess.run(
+            ["git", "-C", tmp, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        current_sha = sha_result.stdout.strip() if sha_result.returncode == 0 else ""
+
         pulled: list[str] = []
         for src in sorted(Path(tmp).iterdir()):
             if not src.is_dir() or src.name.startswith("."):
@@ -91,6 +154,8 @@ def pull_patterns(root: Path) -> None:
     installed = set(data.get("installed", []))
     installed.update(pulled)
     data["installed"] = sorted(installed)
+    if current_sha:
+        data["last_pull_sha"] = current_sha
     _write_patterns_cfg(root, data)
     print(f"Patterns gepullt: {', '.join(pulled)}")
 
@@ -192,11 +257,36 @@ def remove_pattern(root: Path, name: str) -> None:
 
 def update_patterns(root: Path) -> None:
     data = _read_patterns_cfg(root)
-    sources = data.get("sources", {})
-    if not sources:
-        print("No sources configured.")
+    local_sha = data.get("last_pull_sha", "")
+
+    print("Prüfe auf Updates ...")
+    result = subprocess.run(
+        ["git", "ls-remote", PATTERNS_REPO_URL, "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Fehler beim Abrufen des Remote-Status:\n{result.stderr.strip()}")
         return
-    print("Pattern update is a stub. Configure sources to enable sync.")
+
+    remote_sha = result.stdout.split()[0] if result.stdout.strip() else ""
+
+    if not remote_sha:
+        print("Remote-Hash konnte nicht ermittelt werden.")
+        return
+
+    if not local_sha:
+        print("Kein lokaler Stand gespeichert. Führe 'pattern pull' aus.")
+        return
+
+    if remote_sha == local_sha:
+        print("Patterns sind aktuell.")
+        return
+
+    print(f"Update verfügbar!\n  Lokal:  {local_sha[:12]}\n  Remote: {remote_sha[:12]}")
+    answer = input("Jetzt pullen? [Y/n]: ").strip().lower()
+    if answer in ("", "y", "yes"):
+        pull_patterns(root)
 
 
 def _read_schedule(path: Path) -> dict[str, Any]:
@@ -246,6 +336,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("init", help="Create required folders/files if missing")
     sub.add_parser("run", help="Run scheduled commits for today")
+    sub.add_parser("update", help="Update tool.py from the remote repo")
 
     pat = sub.add_parser("pattern", help="Pattern management")
     pat_sub = pat.add_subparsers(dest="pattern_cmd", required=True)
@@ -273,6 +364,10 @@ def _execute_command(argv: list[str]) -> None:
     if args.command == "init":
         ensure_scaffold(ROOT)
         print("Initialized.")
+        return
+
+    if args.command == "update":
+        update_tool()
         return
 
     ensure_scaffold(ROOT, pull=False)
@@ -319,6 +414,10 @@ class ToolShell(cmd.Cmd):
     def do_init(self, arg: str) -> None:
         """Initialize required folders/files."""
         _execute_command(["init"])
+
+    def do_update(self, arg: str) -> None:
+        """Update tool.py from the remote repo."""
+        update_tool()
 
     def do_run(self, arg: str) -> None:
         """Run scheduled commits for today."""
