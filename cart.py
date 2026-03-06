@@ -85,13 +85,8 @@ def login() -> None:
         if answer not in ("y", "yes"):
             return
 
-    username = input("GitHub username: ").strip()
-    if not username:
-        print("Aborted.")
-        return
-
     print(
-        "\nTo get a Personal Access Token:\n"
+        "To get a Personal Access Token:\n"
         "  1. Go to github.com → your profile icon → Settings\n"
         "  2. Scroll down → Developer settings → Personal access tokens → Tokens (classic)\n"
         "  3. Click 'Generate new token (classic)'\n"
@@ -119,16 +114,11 @@ def login() -> None:
         return
     try:
         user_data = json.loads(verify.stdout)
-        actual_username = user_data.get("login", "")
-        if not actual_username:
+        username = user_data.get("login", "")
+        if not username:
             print("Invalid token. Please check your Personal Access Token.")
             return
-        if actual_username.lower() != username.lower():
-            print(f"Token is valid but belongs to '{actual_username}', not '{username}'.")
-            print(f"Continuing as '{actual_username}'.")
-            username = actual_username
-        else:
-            print(f"Token verified. Hello, {username}!")
+        print(f"Token verified. Hello, {username}!")
     except Exception:
         print("Invalid token. Please check your Personal Access Token.")
         return
