@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import cmd
+import getpass
 import importlib.util
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ import yaml
 ROOT = Path.cwd()
 PATTERNS_REPO_URL = "https://github.com/Togibu/contrib-art-patterns.git"
 TOOL_REPO_URL = "https://github.com/Togibu/contrib-art.git"
+CREDENTIALS_FILE = Path.home() / ".config" / "cart" / "credentials.yml"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "repository": {"path": "./repo", "branch": "main"},
@@ -29,6 +31,50 @@ DEFAULT_PATTERNS: dict[str, Any] = {
 }
 
 DEFAULT_SCHEDULE: dict[str, Any] = {"pattern": None, "schedule": {}}
+
+
+def _read_credentials() -> dict[str, str]:
+    if not CREDENTIALS_FILE.exists():
+        return {}
+    data = yaml.safe_load(CREDENTIALS_FILE.read_text(encoding="utf-8"))
+    return data or {}
+
+
+def _write_credentials(data: dict[str, str]) -> None:
+    CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CREDENTIALS_FILE.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    CREDENTIALS_FILE.chmod(0o600)
+
+
+def login() -> None:
+    creds = _read_credentials()
+    if creds.get("username"):
+        print(f"Already logged in as: {creds['username']}")
+        answer = input("Log in with a different account? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            return
+
+    username = input("GitHub username: ").strip()
+    if not username:
+        print("Aborted.")
+        return
+
+    token = getpass.getpass("Personal Access Token (hidden): ").strip()
+    if not token:
+        print("Aborted.")
+        return
+
+    _write_credentials({"username": username, "token": token})
+    print(f"Logged in as: {username}")
+
+
+def logout() -> None:
+    if not CREDENTIALS_FILE.exists():
+        print("Not logged in.")
+        return
+    creds = _read_credentials()
+    CREDENTIALS_FILE.unlink()
+    print(f"Logged out. (was: {creds.get('username', '?')})")
 
 
 def update_tool() -> None:
@@ -332,7 +378,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("init", help="Create required folders/files if missing")
     sub.add_parser("run", help="Run scheduled commits for today")
-    sub.add_parser("update", help="Update tool.py from the remote repo")
+    sub.add_parser("update", help="Update cart.py from the remote repo")
+    sub.add_parser("login", help="Save GitHub credentials for pushing commits")
+    sub.add_parser("logout", help="Remove saved GitHub credentials")
 
     pat = sub.add_parser("pattern", help="Pattern management")
     pat_sub = pat.add_subparsers(dest="pattern_cmd", required=True)
@@ -364,6 +412,14 @@ def _execute_command(argv: list[str]) -> None:
 
     if args.command == "update":
         update_tool()
+        return
+
+    if args.command == "login":
+        login()
+        return
+
+    if args.command == "logout":
+        logout()
         return
 
     ensure_scaffold(ROOT, pull=False)
@@ -412,8 +468,16 @@ class CartShell(cmd.Cmd):
         _execute_command(["init"])
 
     def do_update(self, arg: str) -> None:
-        """Update tool.py from the remote repo."""
+        """Update cart.py from the remote repo."""
         update_tool()
+
+    def do_login(self, arg: str) -> None:
+        """Save GitHub credentials for pushing commits."""
+        login()
+
+    def do_logout(self, arg: str) -> None:
+        """Remove saved GitHub credentials."""
+        logout()
 
     def do_run(self, arg: str) -> None:
         """Run scheduled commits for today."""
