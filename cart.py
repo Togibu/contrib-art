@@ -574,6 +574,65 @@ def run_schedule(root: Path) -> None:
     print(f"Executed {count} commits for {today}.")
 
 
+def setup_cron() -> None:
+    cart_path = str(Path(__file__).resolve())
+    python = sys.executable
+
+    time_str = input("Daily run time (HH:MM) [08:00]: ").strip()
+    if not time_str:
+        time_str = "08:00"
+    try:
+        hh, mm = time_str.split(":")
+        hh, mm = int(hh), int(mm)
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
+            raise ValueError
+    except ValueError:
+        print("Invalid time. Please use HH:MM format (e.g. 08:00).")
+        return
+
+    dir_str = input(f"Working directory (blank = current: {ROOT}): ").strip()
+    work_dir = Path(dir_str).resolve() if dir_str else ROOT
+    if not work_dir.is_dir():
+        print(f"Directory not found: {work_dir}")
+        return
+
+    print(
+        "\nNote: if you move the working directory, you must run "
+        "'cron remove' and 'cron setup' again to update the cron job."
+    )
+
+    cron_entry = f"{mm} {hh} * * * cd {work_dir} && {python} {cart_path} run"
+    marker = "# cart-auto"
+    full_entry = f"{cron_entry}  {marker}"
+
+    # Read existing crontab, strip any previous cart entry
+    result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    existing = result.stdout if result.returncode == 0 else ""
+    lines = [ln for ln in existing.splitlines() if marker not in ln]
+    lines.append(full_entry)
+    new_crontab = "\n".join(lines) + "\n"
+
+    write = subprocess.run(["crontab", "-"], input=new_crontab, text=True, capture_output=True)
+    if write.returncode != 0:
+        print(f"Failed to write crontab: {write.stderr.strip()}")
+        return
+
+    print(f"Cron job set: runs daily at {hh:02d}:{mm:02d}")
+    print(f"  {cron_entry}")
+
+
+def remove_cron() -> None:
+    marker = "# cart-auto"
+    result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    if result.returncode != 0 or marker not in result.stdout:
+        print("No cart cron job found.")
+        return
+    lines = [ln for ln in result.stdout.splitlines() if marker not in ln]
+    new_crontab = "\n".join(lines) + "\n"
+    subprocess.run(["crontab", "-"], input=new_crontab, text=True, capture_output=True)
+    print("Cron job removed.")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cart", description="Contribution graph art scheduler")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -583,6 +642,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("update", help="Update cart.py from the remote repo")
     sub.add_parser("login", help="Save GitHub credentials for pushing commits")
     sub.add_parser("logout", help="Remove saved GitHub credentials")
+
+    cron = sub.add_parser("cron", help="Manage the daily cron job (Linux)")
+    cron_sub = cron.add_subparsers(dest="cron_cmd", required=True)
+    cron_sub.add_parser("setup", help="Create or update the daily cron job")
+    cron_sub.add_parser("remove", help="Remove the daily cron job")
 
     pat = sub.add_parser("pattern", help="Pattern management")
     pat_sub = pat.add_subparsers(dest="pattern_cmd", required=True)
@@ -622,6 +686,13 @@ def _execute_command(argv: list[str]) -> None:
 
     if args.command == "logout":
         logout()
+        return
+
+    if args.command == "cron":
+        if args.cron_cmd == "setup":
+            setup_cron()
+        elif args.cron_cmd == "remove":
+            remove_cron()
         return
 
     ensure_scaffold(ROOT, pull=False)
@@ -684,6 +755,16 @@ class CartShell(cmd.Cmd):
     def do_run(self, arg: str) -> None:
         """Run scheduled commits for today."""
         _execute_command(["run"])
+
+    def do_cron(self, arg: str) -> None:
+        """Manage daily cron job. Usage: cron setup|remove"""
+        sub = arg.strip()
+        if sub == "setup":
+            setup_cron()
+        elif sub == "remove":
+            remove_cron()
+        else:
+            print("Usage: cron setup|remove")
 
     def do_pattern(self, arg: str) -> None:
         """Pattern management. Usage: pattern list|pull|choose <name>|install <name>|remove <name>|update"""
