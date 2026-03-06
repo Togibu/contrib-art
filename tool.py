@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import cmd
 import importlib.util
+import shutil
+import subprocess
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -12,6 +15,7 @@ import yaml
 
 
 ROOT = Path.cwd()
+PATTERNS_REPO_URL = "https://github.com/Togibu/contrib-art-patterns.git"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "repository": {"path": "./repo", "branch": "main"},
@@ -20,126 +24,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 DEFAULT_PATTERNS: dict[str, Any] = {
     "sources": {"default": "https://example.com/pattern-repo"},
-    "installed": ["text"],
+    "installed": [],
 }
 
 DEFAULT_SCHEDULE: dict[str, Any] = {"pattern": None, "schedule": {}}
-
-TEXT_PATTERN_VERSION = "1.1"
-
-TEXT_PATTERN_MANIFEST = """name: text
-version: 1.1
-entrypoint: pattern.py
-"""
-
-TEXT_PATTERN_CODE = """from __future__ import annotations
-
-from datetime import date, timedelta
-from pathlib import Path
-from typing import Any
-
-import yaml
-
-
-def _write_schedule(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-
-
-def run(context: dict[str, Any]) -> None:
-    print("Text pattern generator")
-    text = input("Text (A-Z, 0-9, space): ").strip().upper()
-    start = input("Start date for first column (Sunday) [YYYY-MM-DD, blank=next Sunday]: ").strip()
-    commits_per_fill = int(input("Commits per filled cell: ").strip())
-
-    font = {
-        "A": [" ### ", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"],
-        "B": ["#### ", "#   #", "#   #", "#### ", "#   #", "#   #", "#### "],
-        "C": [" ####", "#    ", "#    ", "#    ", "#    ", "#    ", " ####"],
-        "D": ["#### ", "#   #", "#   #", "#   #", "#   #", "#   #", "#### "],
-        "E": ["#####", "#    ", "#    ", "#### ", "#    ", "#    ", "#####"],
-        "F": ["#####", "#    ", "#    ", "#### ", "#    ", "#    ", "#    "],
-        "G": [" ####", "#    ", "#    ", "#  ##", "#   #", "#   #", " ####"],
-        "H": ["#   #", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"],
-        "I": ["#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "#####"],
-        "J": ["#####", "   # ", "   # ", "   # ", "   # ", "#  # ", " ##  "],
-        "K": ["#   #", "#  # ", "# #  ", "##   ", "# #  ", "#  # ", "#   #"],
-        "L": ["#    ", "#    ", "#    ", "#    ", "#    ", "#    ", "#####"],
-        "M": ["#   #", "## ##", "# # #", "#   #", "#   #", "#   #", "#   #"],
-        "N": ["#   #", "##  #", "# # #", "#  ##", "#   #", "#   #", "#   #"],
-        "O": [" ### ", "#   #", "#   #", "#   #", "#   #", "#   #", " ### "],
-        "P": ["#### ", "#   #", "#   #", "#### ", "#    ", "#    ", "#    "],
-        "Q": [" ### ", "#   #", "#   #", "#   #", "# # #", "#  # ", " ## #"],
-        "R": ["#### ", "#   #", "#   #", "#### ", "# #  ", "#  # ", "#   #"],
-        "S": [" ####", "#    ", "#    ", " ### ", "    #", "    #", "#### "],
-        "T": ["#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "  #  "],
-        "U": ["#   #", "#   #", "#   #", "#   #", "#   #", "#   #", " ### "],
-        "V": ["#   #", "#   #", "#   #", "#   #", "#   #", " # # ", "  #  "],
-        "W": ["#   #", "#   #", "#   #", "# # #", "# # #", "## ##", "#   #"],
-        "X": ["#   #", "#   #", " # # ", "  #  ", " # # ", "#   #", "#   #"],
-        "Y": ["#   #", "#   #", " # # ", "  #  ", "  #  ", "  #  ", "  #  "],
-        "Z": ["#####", "    #", "   # ", "  #  ", " #   ", "#    ", "#####"],
-        "0": [" ### ", "#   #", "#  ##", "# # #", "##  #", "#   #", " ### "],
-        "1": ["  #  ", " ##  ", "# #  ", "  #  ", "  #  ", "  #  ", "#####"],
-        "2": [" ### ", "#   #", "    #", "   # ", "  #  ", " #   ", "#####"],
-        "3": ["#####", "    #", "   # ", "  ## ", "    #", "#   #", " ### "],
-        "4": ["   # ", "  ## ", " # # ", "#  # ", "#####", "   # ", "   # "],
-        "5": ["#####", "#    ", "#    ", "#### ", "    #", "#   #", " ### "],
-        "6": [" ### ", "#   #", "#    ", "#### ", "#   #", "#   #", " ### "],
-        "7": ["#####", "    #", "   # ", "  #  ", " #   ", " #   ", " #   "],
-        "8": [" ### ", "#   #", "#   #", " ### ", "#   #", "#   #", " ### "],
-        "9": [" ### ", "#   #", "#   #", " ####", "    #", "#   #", " ### "],
-        " ": ["     ", "     ", "     ", "     ", "     ", "     ", "     "],
-    }
-
-    def build_grid(text_value: str) -> list[str]:
-        rows = [""] * 7
-        for ch in text_value:
-            glyph = font.get(ch, font[" "])
-            for i in range(7):
-                rows[i] += glyph[i] + " "
-        return [r.rstrip() for r in rows]
-
-    grid = build_grid(text)
-
-    if start:
-        start_date = date.fromisoformat(start)
-    else:
-        today = date.today()
-        days_until_sun = (6 - today.weekday()) % 7
-        start_date = today + timedelta(days=days_until_sun)
-
-    end_date = start_date + timedelta(days=(len(grid[0]) * 7 - 1))
-
-    print("\\nPreview (7xN, # = filled):")
-    for row in grid:
-        print("".join("#" if c != " " else "." for c in row))
-
-    print(f"\\nDate range: {start_date.isoformat()} .. {end_date.isoformat()}")
-    confirm = input("\\nWrite schedule.yml? [Y/n]: ").strip().lower()
-    if confirm not in ("", "y", "yes"):
-        print("Aborted.")
-        return
-
-    schedule: dict[str, int] = {}
-    for col in range(len(grid[0])):
-        for row in range(7):
-            if col >= len(grid[row]):
-                continue
-            if grid[row][col] != " ":
-                day = start_date + timedelta(days=(col * 7 + row))
-                schedule[day.isoformat()] = commits_per_fill
-
-    data = {"pattern": "text", "schedule": schedule}
-    _write_schedule(context["schedule_path"], data)
-    print(f"Wrote schedule with {len(schedule)} days.")
-"""
 
 
 def _write_yaml(path: Path, data: dict[str, Any]) -> None:
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
-def ensure_scaffold(root: Path) -> None:
+def ensure_scaffold(root: Path, pull: bool | None = None) -> None:
     (root / "patterns").mkdir(exist_ok=True)
 
     config_path = root / "config.yml"
@@ -155,23 +50,49 @@ def ensure_scaffold(root: Path) -> None:
     if not schedule_path.exists():
         _write_yaml(schedule_path, DEFAULT_SCHEDULE)
 
-    # Example pattern scaffold (text)
-    text_dir = root / "patterns" / "text"
-    text_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = text_dir / "manifest.yml"
-    pattern_path = text_dir / "pattern.py"
+    if pull is None:
+        answer = input("Patterns aus contrib-art-patterns pullen? [Y/n]: ").strip().lower()
+        pull = answer in ("", "y", "yes")
 
-    current_version = None
-    if manifest_path.exists():
-        try:
-            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-            current_version = str(manifest.get("version") or "")
-        except Exception:
-            current_version = None
+    if pull:
+        pull_patterns(root)
 
-    if (not manifest_path.exists()) or (current_version != TEXT_PATTERN_VERSION):
-        manifest_path.write_text(TEXT_PATTERN_MANIFEST, encoding="utf-8")
-        pattern_path.write_text(TEXT_PATTERN_CODE, encoding="utf-8")
+
+def pull_patterns(root: Path) -> None:
+    print(f"Klone {PATTERNS_REPO_URL} ...")
+    with tempfile.TemporaryDirectory() as tmp:
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", PATTERNS_REPO_URL, tmp],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"Fehler beim Klonen:\n{result.stderr.strip()}")
+            return
+
+        patterns_dir = root / "patterns"
+        patterns_dir.mkdir(exist_ok=True)
+
+        pulled: list[str] = []
+        for src in sorted(Path(tmp).iterdir()):
+            if not src.is_dir() or src.name.startswith("."):
+                continue
+            dest = patterns_dir / src.name
+            if dest.exists():
+                shutil.rmtree(dest)
+            shutil.copytree(src, dest)
+            pulled.append(src.name)
+
+    if not pulled:
+        print("Keine Patterns im Repo gefunden.")
+        return
+
+    data = _read_patterns_cfg(root)
+    installed = set(data.get("installed", []))
+    installed.update(pulled)
+    data["installed"] = sorted(installed)
+    _write_patterns_cfg(root, data)
+    print(f"Patterns gepullt: {', '.join(pulled)}")
 
 
 def _read_patterns_cfg(root: Path) -> dict[str, Any]:
@@ -330,6 +251,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pat_sub = pat.add_subparsers(dest="pattern_cmd", required=True)
 
     pat_sub.add_parser("list", help="List installed patterns")
+    pat_sub.add_parser("pull", help="Pull patterns from contrib-art-patterns repo")
     choose = pat_sub.add_parser("choose", help="Choose a pattern and run its generator")
     choose.add_argument("name", help="Pattern name")
 
@@ -353,7 +275,7 @@ def _execute_command(argv: list[str]) -> None:
         print("Initialized.")
         return
 
-    ensure_scaffold(ROOT)
+    ensure_scaffold(ROOT, pull=False)
 
     if args.command == "run":
         run_schedule(ROOT)
@@ -367,6 +289,10 @@ def _execute_command(argv: list[str]) -> None:
             else:
                 for name in patterns:
                     print(name)
+            return
+
+        if args.pattern_cmd == "pull":
+            pull_patterns(ROOT)
             return
 
         if args.pattern_cmd == "choose":
@@ -407,7 +333,7 @@ class ToolShell(cmd.Cmd):
         _execute_command(argv)
 
     def complete_pattern(self, text: str, line: str, begidx: int, endidx: int):
-        options = ["list", "choose", "install", "remove", "update"]
+        options = ["list", "pull", "choose", "install", "remove", "update"]
         tokens = line.split()
         if len(tokens) <= 2:
             return [o for o in options if o.startswith(text)]
