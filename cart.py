@@ -514,19 +514,40 @@ def perform_commits(root: Path, count: int) -> None:
     # Update progress.yml with real upload timestamp
     progress_path = repo_dir / "progress.yml"
     schedule_data = _read_schedule(root / "schedule.yml")
+    new_pattern = schedule_data.get("pattern")
+    new_meta = schedule_data.get("meta", {})
+    new_entry = {"date": today, "uploaded_at": now, "commits": count}
 
     if not progress_path.exists():
-        meta = schedule_data.get("meta", {})
         progress_data: dict[str, Any] = {
-            "pattern": schedule_data.get("pattern"),
-            "meta": meta,
-            "entries": [{"date": today, "uploaded_at": now, "commits": count}],
+            "pattern": new_pattern,
+            "meta": new_meta,
+            "entries": [new_entry],
         }
     else:
         progress_data = yaml.safe_load(progress_path.read_text(encoding="utf-8")) or {}
-        entries = progress_data.get("entries", [])
-        entries.append({"date": today, "uploaded_at": now, "commits": count})
-        progress_data["entries"] = entries
+        if progress_data.get("pattern") != new_pattern:
+            # Pattern changed — archive the previous run and start a fresh header.
+            previous = progress_data.get("previous_runs", [])
+            previous.append({
+                "pattern": progress_data.get("pattern"),
+                "meta": progress_data.get("meta", {}),
+                "entries": progress_data.get("entries", []),
+            })
+            print(
+                f"Pattern changed: {progress_data.get('pattern')} → {new_pattern}. "
+                "Archived previous run in progress.yml."
+            )
+            progress_data = {
+                "pattern": new_pattern,
+                "meta": new_meta,
+                "entries": [new_entry],
+                "previous_runs": previous,
+            }
+        else:
+            entries = progress_data.get("entries", [])
+            entries.append(new_entry)
+            progress_data["entries"] = entries
 
     progress_path.write_text(yaml.safe_dump(progress_data, sort_keys=False), encoding="utf-8")
     subprocess.run(
@@ -576,6 +597,21 @@ def run_schedule(root: Path) -> None:
     data["schedule"] = schedule
     _write_schedule(schedule_path, data)
     print(f"Executed {count} commits for {today}.")
+
+
+def reset_schedule(root: Path, auto_yes: bool = False) -> None:
+    schedule_path = root / "schedule.yml"
+    print(
+        "This will reset schedule.yml (the active commit plan).\n"
+        "Credentials, installed patterns, and the target repo are NOT touched."
+    )
+    if not auto_yes:
+        answer = input("Reset schedule.yml? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Aborted.")
+            return
+    _write_yaml(schedule_path, DEFAULT_SCHEDULE)
+    print("schedule.yml reset.")
 
 
 CRON_MARKER_RUN = "# cart-auto-run"
@@ -715,6 +751,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("run", help="Run scheduled commits for today")
     update_p = sub.add_parser("update", help="Update cart.py from the remote repo")
     update_p.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    reset_p = sub.add_parser("reset", help="Reset schedule.yml to empty (does not log out)")
+    reset_p.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     sub.add_parser("login", help="Save GitHub credentials for pushing commits")
     sub.add_parser("logout", help="Remove saved GitHub credentials")
 
@@ -781,6 +819,10 @@ def _execute_command(argv: list[str]) -> None:
         run_schedule(ROOT)
         return
 
+    if args.command == "reset":
+        reset_schedule(ROOT, auto_yes=args.yes)
+        return
+
     if args.command == "pattern":
         if args.pattern_cmd == "list":
             patterns = list_patterns(ROOT)
@@ -837,6 +879,12 @@ class CartShell(cmd.Cmd):
         """Run scheduled commits for today."""
         _execute_command(["run"])
 
+    def do_reset(self, arg: str) -> None:
+        """Reset schedule.yml to empty (does not log out). Use -y to skip confirmation."""
+        auto_yes = "-y" in arg.split() or "--yes" in arg.split()
+        ensure_scaffold(ROOT, pull=False)
+        reset_schedule(ROOT, auto_yes=auto_yes)
+
     def do_cron(self, arg: str) -> None:
         """Manage daily cron job. Usage: cron setup [run|update]|remove"""
         parts = arg.split()
@@ -875,6 +923,10 @@ class CartShell(cmd.Cmd):
         return True
 
     def do_quit(self, arg: str) -> bool:
+        """Exit the shell."""
+        return self.do_exit(arg)
+
+    def do_bye(self, arg: str) -> bool:
         """Exit the shell."""
         return self.do_exit(arg)
 
