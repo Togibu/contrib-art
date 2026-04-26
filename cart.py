@@ -250,7 +250,7 @@ def ensure_scaffold(root: Path, pull: bool | None = None) -> None:
         pull_patterns(root)
 
 
-def pull_patterns(root: Path) -> None:
+def pull_patterns(root: Path, auto_yes: bool = False) -> None:
     print(f"Cloning {PATTERNS_REPO_URL}...")
     with tempfile.TemporaryDirectory() as tmp:
         result = subprocess.run(
@@ -288,12 +288,41 @@ def pull_patterns(root: Path) -> None:
 
     data = _read_patterns_cfg(root)
     installed = set(data.get("installed", []))
+    previous_remote = set(data.get("pulled_from_remote", []))
+    current_remote = set(pulled)
+
+    # Patterns that were in the remote at the last pull but no longer are
+    # (renamed or deleted upstream). Local-only patterns from
+    # `cart pattern install` are never in `pulled_from_remote`, so they're left alone.
+    stale = previous_remote - current_remote
+    removed: list[str] = []
+    for name in sorted(stale):
+        local_dir = patterns_dir / name
+        if not local_dir.exists():
+            installed.discard(name)
+            continue
+        if auto_yes:
+            answer = "y"
+        else:
+            answer = input(
+                f"Pattern '{name}' is no longer in the remote (likely renamed "
+                "or deleted upstream). Remove local copy? [Y/n]: "
+            ).strip().lower()
+        if answer in ("", "y", "yes"):
+            shutil.rmtree(local_dir)
+            installed.discard(name)
+            removed.append(name)
+
     installed.update(pulled)
     data["installed"] = sorted(installed)
+    data["pulled_from_remote"] = sorted(current_remote)
     if current_sha:
         data["last_pull_sha"] = current_sha
     _write_patterns_cfg(root, data)
+
     print(f"Patterns pulled: {', '.join(pulled)}")
+    if removed:
+        print(f"Patterns removed (gone from remote): {', '.join(removed)}")
 
 
 def _read_patterns_cfg(root: Path) -> dict[str, Any]:
@@ -421,7 +450,7 @@ def update_patterns(root: Path, auto_yes: bool = False) -> None:
 
     print(f"Update available!\n  Local:  {local_sha[:12]}\n  Remote: {remote_sha[:12]}")
     if auto_yes:
-        pull_patterns(root)
+        pull_patterns(root, auto_yes=True)
         return
     answer = input("Pull now? [Y/n]: ").strip().lower()
     if answer in ("", "y", "yes"):
