@@ -152,17 +152,4 @@ Available top-level commands: `init`, `run`, `update`, `login`, `logout`, `patte
 
 ## Planned patterns
 
-| Name             | Description                                                  |
-|------------------|--------------------------------------------------------------|
-| `wave`           | Sine wave across the grid, configurable amplitude/wavelength |
-| `dna`            | Two phase-shifted sine waves crossing each other             |
-| `rain`           | Random short vertical streaks, configurable density          |
-| `barcode`        | Random vertical bars growing from the bottom                 |
-| `diagonal`       | Diagonal stripes, configurable width and spacing             |
-| `heartbeat`      | Flat line with periodic EKG-style spikes                     |
-| `morse`          | User message encoded as Morse code                           |
-| `checkerboard`   | Checkerboard pattern, configurable field size                |
-| `scatter`        | Randomly scattered single cells like a starfield             |
-| `gradient`       | Cell density increases left-to-right or top-to-bottom        |
-| `border`         | Only the outer frame of the grid is filled                   |
-| `tetris`         | Random Tetris pieces distributed across the grid             |
+(none — all originally planned patterns are now implemented in `contrib-art-patterns`)
