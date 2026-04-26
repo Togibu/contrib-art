@@ -85,6 +85,79 @@ if end_date.year > start_date.year:
     )
 ```
 
+### Multi-shade rendering convention
+
+Use this when different parts of the pattern should render at different
+intensities on the GitHub graph (e.g. dna's two strands, tetris piece types,
+gradients). Patterns where shading adds nothing (border, checkerboard, plain
+text) should stay binary with `#`/`.` and a `bool` grid — no need to retrofit.
+
+| Level | Glyph | Commits | GitHub shade      |
+|-------|-------|---------|-------------------|
+| 0     | `·`   | 0       | empty             |
+| 1     | `░`   | 1       | light green       |
+| 2     | `▒`   | 3       | medium green      |
+| 3     | `▓`   | 5       | medium-dark green |
+| 4     | `█`   | 8       | dark green        |
+
+Levels 1–4 give four distinct shades while staying within the default
+`max_commits_per_day: 8`. The mapping is GitHub-graph approximate, not exact —
+GitHub's real thresholds depend on the user's annual max.
+
+Patterns can't share modules (each `pattern.py` is loaded individually via
+`importlib.util.spec_from_file_location`, with no sibling-import setup), so
+inline these constants and helpers at the top of `pattern.py`:
+
+```python
+import sys
+
+GLYPHS = ["·", "░", "▒", "▓", "█"]
+COLORS_256 = [238, 22, 28, 34, 40]  # gray + 4 GitHub-ish greens
+LEVEL_COMMITS = [0, 1, 3, 5, 8]
+
+
+def _glyph_str(grid: list[list[int]]) -> str:
+    return "\n".join(
+        "".join(GLYPHS[max(0, min(4, lvl))] for lvl in row) for row in grid
+    )
+
+
+def _render(grid: list[list[int]], color: bool | None = None) -> str:
+    if color is None:
+        color = sys.stdout.isatty()
+    if not color:
+        return _glyph_str(grid)
+    lines = []
+    for row in grid:
+        cells = []
+        for lvl in row:
+            lvl = max(0, min(4, lvl))
+            cells.append(f"\033[38;5;{COLORS_256[lvl]}m{GLYPHS[lvl]}\033[0m")
+        lines.append("".join(cells))
+    return "\n".join(lines)
+```
+
+Then in your pattern:
+
+- `_generate_*` returns `list[list[int]]` (level grid 0–4), not `bool`.
+- Print the preview with `_render(grid)` — color is auto-enabled on TTY and
+  auto-disabled when stdout is piped or redirected.
+- Store `meta["preview"] = _glyph_str(grid)` — **never** put ANSI escape codes
+  in YAML; the unfärbige glyphs render fine in `progress.yml`.
+- When writing `schedule.yml`, map level → commits:
+
+  ```python
+  for col in range(num_weeks):
+      for r in range(7):
+          level = grid[r][col]
+          if level > 0:
+              day = start_date + timedelta(days=(col * 7 + r))
+              schedule[day.isoformat()] = LEVEL_COMMITS[level]
+  ```
+
+- When two pattern features overlap on the same cell, prefer `max(existing, new)`
+  so the brighter feature wins — that's what `dna`, `rain`, and `morse` do.
+
 ---
 
 # cart.py Tool Internals
